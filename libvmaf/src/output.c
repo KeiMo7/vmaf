@@ -37,6 +37,64 @@ static unsigned max_capacity(VmafFeatureCollector *fc)
     return capacity;
 }
 
+/*
+ * Emit window handling. emit_end == 0 means "no upper bound", which together
+ * with emit_start == 0 reproduces the historical unsharded output exactly.
+ */
+static int frame_is_emitted(unsigned index, unsigned emit_start,
+                            unsigned emit_end)
+{
+    if (index < emit_start)
+        return 0;
+    if (emit_end && index >= emit_end)
+        return 0;
+    return 1;
+}
+
+static unsigned pool_index_high(unsigned emit_end, unsigned pic_cnt)
+{
+    return emit_end ? emit_end - 1 : pic_cnt - 1;
+}
+
+/*
+ * Find the highest frame index actually present in any feature vector.
+ * Needed for sharded contexts, where occupied slots start at a global index
+ * greater than zero so pic_cnt-1 cannot be used as the pool upper bound.
+ */
+static unsigned last_written_index(VmafFeatureCollector *fc)
+{
+    unsigned last = 0;
+    for (unsigned j = 0; j < fc->cnt; j++) {
+        FeatureVector *fv = fc->feature_vector[j];
+        for (unsigned i = fv->capacity; i > 0; i--) {
+            if (fv->score[i - 1].written) {
+                if (i - 1 > last)
+                    last = i - 1;
+                break;
+            }
+        }
+    }
+    return last;
+}
+
+static unsigned first_written_index(VmafFeatureCollector *fc)
+{
+    unsigned first = 0;
+    int found = 0;
+    for (unsigned j = 0; j < fc->cnt; j++) {
+        FeatureVector *fv = fc->feature_vector[j];
+        for (unsigned i = 0; i < fv->capacity; i++) {
+            if (fv->score[i].written) {
+                if (!found || i < first)
+                    first = i;
+                found = 1;
+                break;
+            }
+        }
+    }
+    return first;
+}
+
 static const char *pool_method_name[] = {
     [VMAF_POOL_METHOD_MIN] = "min",
     [VMAF_POOL_METHOD_MAX] = "max",
@@ -66,7 +124,8 @@ static int count_leading_zeros_d(double x)
 
 int vmaf_write_output_xml(VmafContext *vmaf, VmafFeatureCollector *fc,
                           FILE *outfile, unsigned subsample, unsigned width,
-                          unsigned height, double fps, unsigned pic_cnt)
+                          unsigned height, double fps, unsigned pic_cnt,
+                          unsigned emit_start, unsigned emit_end)
 {
     if (!vmaf) return -EINVAL;
     if (!fc) return -EINVAL;
@@ -82,6 +141,8 @@ int vmaf_write_output_xml(VmafContext *vmaf, VmafFeatureCollector *fc,
     fprintf(outfile, "  <frames>\n");
     for (unsigned i = 0 ; i < max_capacity(fc); i++) {
         if ((subsample > 1) && (i % subsample))
+            continue;
+        if (!frame_is_emitted(i, emit_start, emit_end))
             continue;
 
         unsigned cnt = 0;
@@ -115,6 +176,11 @@ int vmaf_write_output_xml(VmafContext *vmaf, VmafFeatureCollector *fc,
     fprintf(outfile, "  </frames>\n");
 
     fprintf(outfile, "  <pooled_metrics>\n");
+    const unsigned pool_lo = emit_start > first_written_index(fc)
+                             ? emit_start : first_written_index(fc);
+    const unsigned pool_hi = pool_index_high(emit_end, pic_cnt);
+    const unsigned pool_hi_clamped = pool_hi < last_written_index(fc)
+                                     ? pool_hi : last_written_index(fc);
     for (unsigned i = 0; i < fc->cnt; i++) {
         const char *feature_name = fc->feature_vector[i]->name;
         fprintf(outfile, "    <metric name=\"%s\" ",
@@ -123,7 +189,8 @@ int vmaf_write_output_xml(VmafContext *vmaf, VmafFeatureCollector *fc,
         for (unsigned j = 1; j < VMAF_POOL_METHOD_NB; j++) {
             double score;
             int err = vmaf_feature_score_pooled(vmaf, feature_name, j, &score,
-                                                0, pic_cnt - 1);
+                                                pool_lo,
+                                                pool_hi_clamped);
             if (!err)
             {
                 leading_zeros_count = count_leading_zeros_d(score);
@@ -159,7 +226,8 @@ int vmaf_write_output_xml(VmafContext *vmaf, VmafFeatureCollector *fc,
 
 int vmaf_write_output_json(VmafContext *vmaf, VmafFeatureCollector *fc,
                            FILE *outfile, unsigned subsample, double fps,
-                           unsigned pic_cnt)
+                           unsigned pic_cnt,
+                           unsigned emit_start, unsigned emit_end)
 {
     int leading_zeros_count;
     fprintf(outfile, "{\n");
@@ -180,6 +248,8 @@ int vmaf_write_output_json(VmafContext *vmaf, VmafFeatureCollector *fc,
     for (unsigned i = 0 ; i < max_capacity(fc); i++) {
         if ((subsample > 1) && (i % subsample))
             continue;
+        if (!frame_is_emitted(i, emit_start, emit_end))
+            continue;
 
         unsigned cnt = 0;
         for (unsigned j = 0; j < fc->cnt; j++) {
@@ -189,7 +259,7 @@ int vmaf_write_output_json(VmafContext *vmaf, VmafFeatureCollector *fc,
                 cnt++;
         }
         if (!cnt) continue;
-        fprintf(outfile, "%s", i > 0 ? ",\n" : "\n");
+        fprintf(outfile, "%s", n_frames > 0 ? ",\n" : "\n");
 
         fprintf(outfile, "    {\n");
         fprintf(outfile, "      \"frameNum\": %d,\n", i);
@@ -234,6 +304,11 @@ int vmaf_write_output_json(VmafContext *vmaf, VmafFeatureCollector *fc,
     fprintf(outfile, "\n  ],\n");
 
     fprintf(outfile, "  \"pooled_metrics\": {");
+    const unsigned json_pool_lo = emit_start > first_written_index(fc)
+                                  ? emit_start : first_written_index(fc);
+    const unsigned json_pool_hi =
+        pool_index_high(emit_end, pic_cnt) < last_written_index(fc)
+        ? pool_index_high(emit_end, pic_cnt) : last_written_index(fc);
     for (unsigned i = 0; i < fc->cnt; i++) {
         const char *feature_name = fc->feature_vector[i]->name;
         fprintf(outfile, "%s", i > 0 ? ",\n" : "\n");
@@ -242,7 +317,8 @@ int vmaf_write_output_json(VmafContext *vmaf, VmafFeatureCollector *fc,
         for (unsigned j = 1; j < VMAF_POOL_METHOD_NB; j++) {
             double score;
             int err = vmaf_feature_score_pooled(vmaf, feature_name, j, &score,
-                                                0, pic_cnt - 1);
+                                                json_pool_lo,
+                                                json_pool_hi);
             if (!err) {
                 fprintf(outfile, "%s", j > 1 ? ",\n" : "\n");
                 switch(fpclassify(score)) {
@@ -303,7 +379,8 @@ int vmaf_write_output_json(VmafContext *vmaf, VmafFeatureCollector *fc,
 }
 
 int vmaf_write_output_csv(VmafFeatureCollector *fc, FILE *outfile,
-                           unsigned subsample)
+                           unsigned subsample,
+                           unsigned emit_start, unsigned emit_end)
 {
     int leading_zeros_count;
     fprintf(outfile, "Frame,");
@@ -315,6 +392,8 @@ int vmaf_write_output_csv(VmafFeatureCollector *fc, FILE *outfile,
 
     for (unsigned i = 0 ; i < max_capacity(fc); i++) {
         if ((subsample > 1) && (i % subsample))
+            continue;
+        if (!frame_is_emitted(i, emit_start, emit_end))
             continue;
 
         unsigned cnt = 0;
@@ -346,11 +425,14 @@ int vmaf_write_output_csv(VmafFeatureCollector *fc, FILE *outfile,
 }
 
 int vmaf_write_output_sub(VmafFeatureCollector *fc, FILE *outfile,
-                          unsigned subsample)
+                          unsigned subsample,
+                          unsigned emit_start, unsigned emit_end)
 {
     int leading_zeros_count;
     for (unsigned i = 0 ; i < max_capacity(fc); i++) {
         if ((subsample > 1) && (i % subsample))
+            continue;
+        if (!frame_is_emitted(i, emit_start, emit_end))
             continue;
 
         unsigned cnt = 0;

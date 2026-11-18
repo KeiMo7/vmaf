@@ -320,20 +320,25 @@ static int extract(VmafFeatureExtractor *fex,
         const VmafPicture *prev = s->motion_five_frame_window
     	    ? &fex->prev_prev_ref
     	    : &fex->prev_ref;
-        if (!prev->ref)
-    	return -EINVAL;
-    
-        const unsigned w = s->w;
-        const unsigned h = s->h;
-        const uint8_t *prev_data = (const uint8_t *)prev->data[0];
-        const uint8_t *cur_data = (const uint8_t *)ref_pic->data[0];
-    
-        uint64_t sad = s->pipeline(prev_data, prev->stride[0],
+        /*
+         * A time-sharded context's first fed frame already carries a global
+         * index >= min_idx but has no predecessor picture. Treat it as a
+         * sequence boundary (score 0) instead of failing; subsequent warm-up
+         * frames establish the real history before any frame is emitted.
+         */
+        if (prev->ref) {
+            const unsigned w = s->w;
+            const unsigned h = s->h;
+            const uint8_t *prev_data = (const uint8_t *)prev->data[0];
+            const uint8_t *cur_data = (const uint8_t *)ref_pic->data[0];
+
+            uint64_t sad = s->pipeline(prev_data, prev->stride[0],
     			       cur_data, ref_pic->stride[0],
     			       s->y_row, w, h, s->bpc);
-    
-        score = MIN((double)sad / 256. / (w * h) * s->motion_fps_weight,
+
+            score = MIN((double)sad / 256. / (w * h) * s->motion_fps_weight,
     		s->motion_max_val);
+        }
     }
 
 write_score:
@@ -374,22 +379,28 @@ static int flush(VmafFeatureExtractor *fex,
     if (!sad_entry) return -EINVAL;
     const char *sad_name = sad_entry->val;
 
-    unsigned n = 0;
-    double score;
-    while (!vmaf_feature_collector_get_score(feature_collector, sad_name, &score, n))
-        n++;
-    const unsigned stride = s->motion_five_frame_window ? 2 : 1;
-    const unsigned min_idx = s->motion_five_frame_window ? 2 : 1;
-    if (!n) {
+    /*
+     * Time-sharded runs feed frames under their true global indices, so the
+     * SAD sequence may start above index 0. Read the actual written range
+     * from the shared collector instead of assuming a zero origin. When the
+     * first index is 0 this is identical to the historical behavior.
+     */
+    unsigned base = 0, last = 0;
+    if (vmaf_feature_collector_get_written_range(feature_collector, sad_name,
+                                                 &base, &last)) {
         vmaf_dictionary_free(&s->feature_name_dict);
         return 1;
     }
+    const unsigned n = last - base + 1;
+    const unsigned stride = s->motion_five_frame_window ? 2 : 1;
+    const unsigned min_idx = s->motion_five_frame_window ? 2 : 1;
 
     double stamp_value = 0.;
     if (n > min_idx) {
         double sad_at_min_idx;
         if (!vmaf_feature_collector_get_score(feature_collector, sad_name,
-                                              &sad_at_min_idx, min_idx)) {
+                                              &sad_at_min_idx,
+                                              base + min_idx)) {
             stamp_value = MIN(motion_blend(sad_at_min_idx,
                                            s->motion_blend_factor,
                                            s->motion_blend_offset),
@@ -398,13 +409,14 @@ static int flush(VmafFeatureExtractor *fex,
     }
 
     double prev_processed = 0.;
-    for (unsigned i = 0; i < n; i++) {
+    for (unsigned k = 0; k < n; k++) {
+        const unsigned i = base + k;
         double sad_i;
         vmaf_feature_collector_get_score(feature_collector, sad_name, &sad_i, i);
 
         double motion2;
 
-        if (i < min_idx) {
+        if (k < min_idx) {
             motion2 = 0.;
         } else {
             const int lo_idx = (int)i - (int)(stride - 1);
@@ -414,7 +426,7 @@ static int flush(VmafFeatureExtractor *fex,
                     feature_collector, sad_name, &hi, hi_idx);
             if (!has_hi) {
                 motion2 = sad_i;
-            } else if (lo_idx >= (int)min_idx) {
+            } else if (lo_idx >= (int)(base + min_idx)) {
                 double lo;
                 vmaf_feature_collector_get_score(
                         feature_collector, sad_name, &lo, lo_idx);
@@ -429,7 +441,7 @@ static int flush(VmafFeatureExtractor *fex,
             "VMAF_integer_feature_motion2_score", motion2, i);
 
         double motion3;
-        if (i < min_idx) {
+        if (k < min_idx) {
             motion3 = stamp_value;
             prev_processed = stamp_value;
         } else {

@@ -544,6 +544,53 @@ static char *test_default_model_is_sdr_when_one_input_unspecified()
 #endif
 
 
+static char *test_shard_options_default_to_zero()
+{
+    char *argv[5] = {"vmaf", "-r", "ref.y4m", "-d", "dis.y4m"};
+    int argc = 5;
+    CLISettings settings;
+    optind = 1;
+    cli_parse(argc, argv, &settings);
+    mu_assert("cli_parse: frame_index_offset must default to 0",
+              settings.frame_index_offset == 0);
+    mu_assert("cli_parse: frame_offset must default to 0",
+              settings.frame_offset == 0);
+    mu_assert("cli_parse: emit_start must default to 0",
+              settings.emit_start == 0);
+    mu_assert("cli_parse: emit_cnt must default to 0",
+              settings.emit_cnt == 0);
+    cli_free(&settings);
+    cli_free_dicts(&settings);
+
+    return NULL;
+}
+
+static char *test_shard_options_parse()
+{
+    char *argv[13] = {"vmaf", "-r", "ref.y4m", "-d", "dis.y4m",
+                      "--frame_index_offset", "12",
+                      "--frame_offset", "10",
+                      "--emit_start", "14",
+                      "--emit_cnt", "6"};
+    int argc = 13;
+    CLISettings settings;
+    optind = 1;
+    cli_parse(argc, argv, &settings);
+    mu_assert("cli_parse: frame_index_offset not parsed",
+              settings.frame_index_offset == 12);
+    mu_assert("cli_parse: frame_offset not parsed",
+              settings.frame_offset == 10);
+    mu_assert("cli_parse: emit_start not parsed",
+              settings.emit_start == 14);
+    mu_assert("cli_parse: emit_cnt not parsed",
+              settings.emit_cnt == 6);
+    cli_free(&settings);
+    cli_free_dicts(&settings);
+
+    return NULL;
+}
+
+
 char *run_tests()
 {
     mu_run_test(test_aom_ctc_v1_0);
@@ -560,6 +607,8 @@ char *run_tests()
     mu_run_test(test_per_side_color_flags_differ);
     mu_run_test(test_one_input_can_be_left_unspecified);
     mu_run_test(test_input_sizes_default_to_width_and_height);
+    mu_run_test(test_shard_options_default_to_zero);
+    mu_run_test(test_shard_options_parse);
     mu_run_test(test_input_sizes_can_differ);
     mu_run_test(test_input_size_overrides_one_input);
 #if VMAF_BUILT_IN_MODELS

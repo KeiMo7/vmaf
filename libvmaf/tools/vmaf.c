@@ -364,12 +364,33 @@ int main(int argc, char *argv[])
             vmaf_picture_unref(&pic_dist);
     }
 
+    /*
+     * Time-shard positioning: discard frames that belong to earlier shards.
+     * They are read and dropped without entering the context, so the first
+     * fed frame is the shard's warm-up start at its true global index.
+     */
+    for (unsigned i = 0; i < c.frame_offset; i++) {
+        if (fetch_picture(vmaf, &vid_ref, &pic_ref, c.color_ref, true,
+                          common_bitdepth)) {
+            fprintf(stderr, "\nreference ended before frame_offset\n");
+            return -1;
+        }
+        vmaf_picture_unref(&pic_ref);
+        if (fetch_picture(vmaf, &vid_dist, &pic_dist, c.color_dist,
+                          dist_pooled, common_bitdepth)) {
+            fprintf(stderr, "\ndistorted ended before frame_offset\n");
+            return -1;
+        }
+        vmaf_picture_unref(&pic_dist);
+    }
     float fps = 0.;
     const time_t t0 = clock();
     unsigned picture_index;
-    for (picture_index = 0 ;; picture_index++) {
+    unsigned fed_cnt;
+    for (fed_cnt = 0, picture_index = c.frame_index_offset; ;
+         fed_cnt++, picture_index++) {
 
-        if (c.frame_cnt && picture_index >= c.frame_cnt)
+        if (c.frame_cnt && fed_cnt >= c.frame_cnt)
             break;
 
         VmafPicture pic_ref, pic_dist;
@@ -429,10 +450,22 @@ int main(int argc, char *argv[])
     }
 
     if (!c.no_prediction) {
+        /*
+         * Pool over the frames that actually exist in this context and fall
+         * inside the emit window. With no shard options this reduces to
+         * [0, picture_index - 1], i.e. the historical behavior.
+         */
+        const unsigned first_global = c.frame_index_offset;
+        const unsigned last_global = picture_index - 1;
+        const unsigned pool_lo =
+            c.emit_start > first_global ? c.emit_start : first_global;
+        unsigned pool_hi = last_global;
+        if (c.emit_cnt && c.emit_start + c.emit_cnt - 1 < pool_hi)
+            pool_hi = c.emit_start + c.emit_cnt - 1;
         for (unsigned i = 0; i < c.model_cnt; i++) {
             double vmaf_score;
             err = vmaf_score_pooled(vmaf, model[i], VMAF_POOL_METHOD_MEAN,
-                                    &vmaf_score, 0, picture_index - 1);
+                                    &vmaf_score, pool_lo, pool_hi);
             if (err) {
                 fprintf(stderr, "problem generating pooled VMAF score\n");
                 return -1;
@@ -450,7 +483,7 @@ int main(int argc, char *argv[])
             VmafModelCollectionScore score = { 0 };
             err = vmaf_score_pooled_model_collection(vmaf, model_collection[i],
                                                      VMAF_POOL_METHOD_MEAN, &score,
-                                                     0, picture_index - 1);
+                                                     pool_lo, pool_hi);
             if (err) {
                 fprintf(stderr, "problem generating pooled VMAF score\n");
                 return -1;
@@ -473,7 +506,8 @@ int main(int argc, char *argv[])
     }
 
     if (c.output_path)
-        vmaf_write_output(vmaf, c.output_path, c.output_fmt);
+        vmaf_write_output_range(vmaf, c.output_path, c.output_fmt,
+                                c.emit_start, c.emit_cnt);
 
     for (unsigned i = 0; i < c.model_cnt; i++)
         vmaf_model_destroy(model[i]);

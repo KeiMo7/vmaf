@@ -33,6 +33,29 @@ typedef struct {
     unsigned frame_skip_ref;
     unsigned frame_skip_dist;
     unsigned frame_cnt;
+    /*
+     * Global frame index assigned to the first frame fed into the context.
+     * Non-zero values are used by time-sharded batch runs: warm-up frames are
+     * still fed into the context (so temporal feature extractors see the same
+     * frame history as an unsharded run) but keep their true global indices.
+     * Defaults to 0, i.e. the historical single-file behavior.
+     */
+    unsigned frame_index_offset;
+    /*
+     * Number of frames discarded from each input before the context is fed.
+     * Unlike frame_skip_*, these position a time shard at its file offset;
+     * the discarded frames never enter the context. Used together with
+     * frame_index_offset so the first fed frame gets its true global index.
+     */
+    unsigned frame_offset;
+    /*
+     * Inclusive lower bound and count of frame indices written to the output
+     * file. Frames outside the emit window are still processed (they act as
+     * temporal context for neighboring shards) but never appear in the output.
+     * emit_cnt == 0 means "emit every frame", preserving the old behavior.
+     */
+    unsigned emit_start;
+    unsigned emit_cnt;
     /* the _ref and _dist sizes default to width and height */
     unsigned width, height;
     unsigned width_ref, height_ref, width_dist, height_dist;

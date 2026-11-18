@@ -33,6 +33,10 @@ enum {
     ARG_FRAME_CNT,
     ARG_FRAME_SKIP_REF,
     ARG_FRAME_SKIP_DIST,
+    ARG_FRAME_INDEX_OFFSET,
+    ARG_FRAME_OFFSET,
+    ARG_EMIT_START,
+    ARG_EMIT_CNT,
     ARG_WIDTH_REF,
     ARG_WIDTH_DIST,
     ARG_HEIGHT_REF,
@@ -74,6 +78,10 @@ static const struct option long_opts[] = {
     { "frame_cnt",        1, NULL, ARG_FRAME_CNT },
     { "frame_skip_ref",   1, NULL, ARG_FRAME_SKIP_REF },
     { "frame_skip_dist",  1, NULL, ARG_FRAME_SKIP_DIST },
+    { "frame_index_offset", 1, NULL, ARG_FRAME_INDEX_OFFSET },
+    { "frame_offset",      1, NULL, ARG_FRAME_OFFSET },
+    { "emit_start",       1, NULL, ARG_EMIT_START },
+    { "emit_cnt",         1, NULL, ARG_EMIT_CNT },
     { "color_range_ref",  1, NULL, ARG_COLOR_RANGE_REF },
     { "color_range_dist", 1, NULL, ARG_COLOR_RANGE_DIST },
     { "color_primaries_ref",  1, NULL, ARG_COLOR_PRIMARIES_REF },
@@ -125,6 +133,17 @@ static void usage(const char *const app, const char *const reason, ...) {
             " --frame_cnt $unsigned:       maximum number of frames to process\n"
             " --frame_skip_ref $unsigned:  skip the first N frames in reference\n"
             " --frame_skip_dist $unsigned: skip the first N frames in distorted\n"
+            " --frame_index_offset $unsigned:\n"
+            "                              global frame index of the first frame\n"
+            "                              fed into the context (time-sharded\n"
+            "                              runs; default 0)\n"
+            " --frame_offset $unsigned:    discard this many frames from each\n"
+            "                              input before feeding the context\n"
+            "                              (time-sharded positioning)\n"
+            " --emit_start $unsigned:      only write frames with global index\n"
+            "                              >= this value to the output (default 0)\n"
+            " --emit_cnt $unsigned:        number of frames to write to the\n"
+            "                              output; 0 writes every frame (default)\n"
             " --subsample: $unsigned       compute scores only every N frames\n"
             " --color_range_ref/_dist $string:\n"
             "                              color range for the reference/distorted input\n"
@@ -704,6 +723,22 @@ void cli_parse(const int argc, char *const *const argv,
             break;
         case ARG_FRAME_SKIP_DIST:
             settings->frame_skip_dist = parse_unsigned(optarg, ARG_FRAME_SKIP_DIST, argv[0]);
+            break;
+        case ARG_FRAME_INDEX_OFFSET:
+            settings->frame_index_offset =
+                parse_unsigned(optarg, ARG_FRAME_INDEX_OFFSET, argv[0]);
+            break;
+        case ARG_FRAME_OFFSET:
+            settings->frame_offset =
+                parse_unsigned(optarg, ARG_FRAME_OFFSET, argv[0]);
+            break;
+        case ARG_EMIT_START:
+            settings->emit_start =
+                parse_unsigned(optarg, ARG_EMIT_START, argv[0]);
+            break;
+        case ARG_EMIT_CNT:
+            settings->emit_cnt =
+                parse_unsigned(optarg, ARG_EMIT_CNT, argv[0]);
             break;
         COLOR_ARG_CASES(range, ARG_COLOR_RANGE, parse_color_range)
         COLOR_ARG_CASES(primaries, ARG_COLOR_PRIMARIES, parse_color_primaries)

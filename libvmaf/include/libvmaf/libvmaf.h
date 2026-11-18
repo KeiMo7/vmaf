@@ -389,6 +389,32 @@ int vmaf_write_output(VmafContext *vmaf, const char *output_path,
                       enum VmafOutputFormat fmt);
 
 /**
+ * Write output to file, restricted to a frame-index emit window.
+ *
+ * Used by time-sharded runs: frames outside `[emit_start, emit_start +
+ * emit_cnt)` are omitted from the per-frame output, and pooled metrics are
+ * computed over that same window. Pass `emit_start = 0, emit_cnt = 0` to
+ * emit every frame, which is identical to `vmaf_write_output()`.
+ *
+ * @param vmaf         The VMAF context allocated with `vmaf_init()`.
+ *
+ * @param output_path  Output file path.
+ *
+ * @param fmt          Output file format.
+ *                     See `enum VmafOutputFormat` for options.
+ *
+ * @param emit_start   First global frame index to emit.
+ *
+ * @param emit_cnt     Number of frames to emit; 0 means every frame from
+ *                     `emit_start` onward.
+ *
+ * @return 0 on success, or < 0 (a negative errno code) on error.
+ */
+int vmaf_write_output_range(VmafContext *vmaf, const char *output_path,
+                            enum VmafOutputFormat fmt,
+                            unsigned emit_start, unsigned emit_cnt);
+
+/**
  * Get libvmaf version.
  */
 const char *vmaf_version(void);

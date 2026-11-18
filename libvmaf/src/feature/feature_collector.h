@@ -78,6 +78,18 @@ int vmaf_feature_collector_get_score(VmafFeatureCollector *feature_collector,
                                      const char *feature_name, double *score,
                                      unsigned index);
 
+/*
+ * Return the range of written indices for `feature_name`.
+ * On success 0 is returned, `*first_index` receives the lowest written
+ * index and `*last_index` the highest. A feature with no written scores, or
+ * an unknown feature name, returns -EINVAL. This lets flush post-processing
+ * handle contexts whose first frame carries a non-zero global index
+ * (time-sharded runs) without assuming scores start at index 0.
+ */
+int vmaf_feature_collector_get_written_range(
+        VmafFeatureCollector *feature_collector, const char *feature_name,
+        unsigned *first_index, unsigned *last_index);
+
 int vmaf_feature_collector_set_aggregate(VmafFeatureCollector *feature_collector,
                                          const char *feature_name,
                                          double score);

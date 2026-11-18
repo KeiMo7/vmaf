@@ -95,8 +95,7 @@ static void aggregate_vector_destroy(AggregateVector *aggregate_vector)
     free(aggregate_vector->metric);
 }
 
-int vmaf_feature_collector_set_aggregate(VmafFeatureCollector *feature_collector,
-                                         const char *feature_name, double score)
+int vmaf_feature_collector_set_aggregate(VmafFeatureCollector *feature_collector,                                         const char *feature_name, double score)
 {
     if (!feature_collector) return -EINVAL;
     if (!feature_name) return -EINVAL;
@@ -434,6 +433,39 @@ int vmaf_feature_collector_get_score(VmafFeatureCollector *feature_collector,
     *score = feature_vector->score[index].value;
 
 unlock:
+    pthread_mutex_unlock(&(feature_collector->lock));
+    return err;
+}
+
+int vmaf_feature_collector_get_written_range(
+        VmafFeatureCollector *feature_collector, const char *feature_name,
+        unsigned *first_index, unsigned *last_index)
+{
+    if (!feature_collector || !feature_name)
+        return -EINVAL;
+
+    pthread_mutex_lock(&(feature_collector->lock));
+    int err = -EINVAL;
+    FeatureVector *feature_vector =
+        find_feature_vector(feature_collector, feature_name);
+    if (feature_vector) {
+        unsigned lo = 0, hi = 0;
+        int found = 0;
+        for (unsigned i = 0; i < feature_vector->capacity; i++) {
+            if (!feature_vector->score[i].written)
+                continue;
+            if (!found) {
+                lo = i;
+                found = 1;
+            }
+            hi = i;
+        }
+        if (found) {
+            if (first_index) *first_index = lo;
+            if (last_index) *last_index = hi;
+            err = 0;
+        }
+    }
     pthread_mutex_unlock(&(feature_collector->lock));
     return err;
 }

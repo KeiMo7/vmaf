@@ -1316,14 +1316,21 @@ const char *vmaf_version(void)
     return VMAF_VERSION;
 }
 
-int vmaf_write_output(VmafContext *vmaf, const char *output_path,
-                      enum VmafOutputFormat fmt)
+int vmaf_write_output_range(VmafContext *vmaf, const char *output_path,
+                            enum VmafOutputFormat fmt,
+                            unsigned emit_start, unsigned emit_cnt)
 {
     FILE *outfile = fopen(output_path, "w");
     if (!outfile) {
         fprintf(stderr, "could not open file: %s\n", output_path);
         return -EINVAL;
     }
+
+    /*
+     * emit_end == 0 is the sentinel for "no upper bound". A positive
+     * emit_cnt is translated into the exclusive upper bound here.
+     */
+    const unsigned emit_end = emit_cnt ? emit_start + emit_cnt : 0;
 
     const double fps = vmaf->pic_cnt /
                 ((double) (vmaf->feature_collector->timer.end -
@@ -1335,19 +1342,23 @@ int vmaf_write_output(VmafContext *vmaf, const char *output_path,
         ret = vmaf_write_output_xml(vmaf, vmaf->feature_collector, outfile,
                                     vmaf->cfg.n_subsample,
                                     vmaf->pic_params.w, vmaf->pic_params.h,
-                                    fps, vmaf->pic_cnt);
+                                    fps, vmaf->pic_cnt,
+                                    emit_start, emit_end);
         break;
     case VMAF_OUTPUT_FORMAT_JSON:
         ret = vmaf_write_output_json(vmaf, vmaf->feature_collector, outfile,
-                                     vmaf->cfg.n_subsample, fps, vmaf->pic_cnt);
+                                     vmaf->cfg.n_subsample, fps, vmaf->pic_cnt,
+                                     emit_start, emit_end);
         break;
     case VMAF_OUTPUT_FORMAT_CSV:
         ret = vmaf_write_output_csv(vmaf->feature_collector, outfile,
-                                    vmaf->cfg.n_subsample);
+                                    vmaf->cfg.n_subsample,
+                                    emit_start, emit_end);
         break;
     case VMAF_OUTPUT_FORMAT_SUB:
         ret = vmaf_write_output_sub(vmaf->feature_collector, outfile,
-                                    vmaf->cfg.n_subsample);
+                                    vmaf->cfg.n_subsample,
+                                    emit_start, emit_end);
         break;
     default:
         ret = -EINVAL;
@@ -1356,4 +1367,10 @@ int vmaf_write_output(VmafContext *vmaf, const char *output_path,
 
     fclose(outfile);
     return ret;
+}
+
+int vmaf_write_output(VmafContext *vmaf, const char *output_path,
+                      enum VmafOutputFormat fmt)
+{
+    return vmaf_write_output_range(vmaf, output_path, fmt, 0, 0);
 }

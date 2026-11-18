@@ -21,16 +21,20 @@
 
 int vmaf_write_output_xml(VmafContext *vmaf, VmafFeatureCollector *fc, FILE *outfile,
                           unsigned subsample, unsigned width, unsigned height,
-                          double fps, unsigned pic_cnt);
+                          double fps, unsigned pic_cnt,
+                          unsigned emit_start, unsigned emit_end);
 
 int vmaf_write_output_json(VmafContext *vmaf, VmafFeatureCollector *fc,
                            FILE *outfile, unsigned subsample, double fps,
-                           unsigned pic_cnt);
+                           unsigned pic_cnt,
+                           unsigned emit_start, unsigned emit_end);
 
 int vmaf_write_output_csv(VmafFeatureCollector *fc, FILE *outfile,
-                           unsigned subsample);
+                           unsigned subsample,
+                           unsigned emit_start, unsigned emit_end);
 
 int vmaf_write_output_sub(VmafFeatureCollector *fc, FILE *outfile,
-                          unsigned subsample);
+                          unsigned subsample,
+                          unsigned emit_start, unsigned emit_end);
 
 #endif /* __VMAF_OUTPUT_H__ */
